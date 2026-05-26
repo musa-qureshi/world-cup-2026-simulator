@@ -13,3 +13,4 @@ data/processed/
 data/external/
 *.egg-info/
 kaggle.json
+match_prediction_metadata.json

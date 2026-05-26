@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Iterable
 
@@ -24,6 +25,10 @@ EXPECTED_COLUMNS = [
 ]
 
 
+def _require_real_data() -> bool:
+    return os.getenv("WORLD_CUP_REQUIRE_REAL_DATA", "").strip().lower() in {"1", "true", "yes"}
+
+
 def load_match_data(path: str | Path | None = None) -> pd.DataFrame:
     """Load a results dataset from CSV or fall back to a synthetic sample."""
 
@@ -35,6 +40,9 @@ def load_match_data(path: str | Path | None = None) -> pd.DataFrame:
     for candidate in [RAW_DIR / "international_results.csv", RAW_DIR / "matches.csv"]:
         if candidate.exists():
             return _standardize_match_frame(pd.read_csv(candidate))
+
+    if _require_real_data():
+        raise FileNotFoundError("No real match dataset found on disk and WORLD_CUP_REQUIRE_REAL_DATA is enabled.")
 
     LOGGER.warning("No match dataset found on disk. Generating a synthetic training sample.")
     return generate_synthetic_results()
@@ -51,6 +59,9 @@ def load_fifa_rankings(path: str | Path | None = None) -> pd.DataFrame:
     for candidate in [RAW_DIR / "fifa_rankings.csv", RAW_DIR / "rankings.csv"]:
         if candidate.exists():
             return _standardize_rankings_frame(pd.read_csv(candidate))
+
+    if _require_real_data():
+        raise FileNotFoundError("No real rankings dataset found on disk and WORLD_CUP_REQUIRE_REAL_DATA is enabled.")
 
     return generate_synthetic_rankings()
 
