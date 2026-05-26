@@ -12,3 +12,4 @@ models/*.json
 data/processed/
 data/external/
 *.egg-info/
+kaggle.json
