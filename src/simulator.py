@@ -28,11 +28,26 @@ class MatchOutcome:
 class WorldCupSimulator:
     """Simulate the FIFA World Cup 2026 using model probabilities."""
 
-    def __init__(self, predictor: MatchPredictor | None = None, teams: list[str] | None = None, seed: int = 42) -> None:
+    def __init__(
+        self,
+        predictor: MatchPredictor | None = None,
+        teams: list[str] | None = None,
+        groups: dict[str, list[str]] | None = None,
+        seed: int = 42,
+    ) -> None:
         self.predictor = predictor or load_predictor()
         self.rng = set_random_seed(seed)
-        self.teams = teams or self._default_world_cup_teams()
-        self.groups = self._build_groups(self.teams)
+        actual_groups = self._actual_world_cup_2026_groups()
+        if groups is not None:
+            self.groups = groups
+        elif teams is not None:
+            self.groups = self._build_groups(teams)
+        else:
+            self.groups = actual_groups
+        if teams is None:
+            team_source = [team for group_teams in self.groups.values() for team in group_teams]
+            teams = team_source or self._default_world_cup_teams()
+        self.teams = teams
 
     def simulate_many_tournaments(self, n_simulations: int = 10000) -> SimulationSummary:
         """Run a Monte Carlo sweep and aggregate placement probabilities."""
@@ -174,6 +189,24 @@ class WorldCupSimulator:
             groups[f"Group {chr(65 + index)}"] = ordered[index * 4 : (index + 1) * 4]
         return groups
 
+    def _actual_world_cup_2026_groups(self) -> dict[str, list[str]]:
+        """Return the official 2026 World Cup groups as drawn in December 2025."""
+
+        return {
+            "Group A": ["Mexico", "South Africa", "South Korea", "Czech Republic"],
+            "Group B": ["Canada", "Bosnia and Herzegovina", "Qatar", "Switzerland"],
+            "Group C": ["Brazil", "Morocco", "Haiti", "Scotland"],
+            "Group D": ["United States", "Paraguay", "Australia", "Turkey"],
+            "Group E": ["Germany", "Curaçao", "Ivory Coast", "Ecuador"],
+            "Group F": ["Netherlands", "Japan", "Sweden", "Tunisia"],
+            "Group G": ["Belgium", "Egypt", "Iran", "New Zealand"],
+            "Group H": ["Spain", "Cape Verde", "Saudi Arabia", "Uruguay"],
+            "Group I": ["France", "Senegal", "Iraq", "Norway"],
+            "Group J": ["Argentina", "Algeria", "Austria", "Jordan"],
+            "Group K": ["Portugal", "DR Congo", "Uzbekistan", "Colombia"],
+            "Group L": ["England", "Croatia", "Ghana", "Panama"],
+        }
+
     def _default_world_cup_teams(self) -> list[str]:
         """Use the strongest teams from the predictor state when no custom list is provided."""
 
@@ -278,8 +311,14 @@ class WorldCupSimulator:
         return {team: counts.get(team, 0) / total for team in teams}
 
 
-def simulate_world_cup(n_simulations: int = 10000, predictor: MatchPredictor | None = None, seed: int = 42) -> SimulationSummary:
+def simulate_world_cup(
+    n_simulations: int = 10000,
+    predictor: MatchPredictor | None = None,
+    teams: list[str] | None = None,
+    groups: dict[str, list[str]] | None = None,
+    seed: int = 42,
+) -> SimulationSummary:
     """Convenience wrapper used by the app and tests."""
 
-    simulator = WorldCupSimulator(predictor=predictor, seed=seed)
+    simulator = WorldCupSimulator(predictor=predictor, teams=teams, groups=groups, seed=seed)
     return simulator.simulate_many_tournaments(n_simulations=n_simulations)

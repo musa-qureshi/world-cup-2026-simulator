@@ -11,6 +11,7 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import GridSearchCV, StratifiedKFold
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score, log_loss
 from sklearn.model_selection import train_test_split
@@ -136,6 +137,77 @@ def _candidate_models(random_state: int = 42) -> dict[str, Pipeline]:
                 )
             ]
         )
+
+
+    def _parameter_grids(random_state: int = 42) -> dict[str, dict[str, list[Any]]]:
+        """Return lightweight hyperparameter grids for tuning."""
+
+        grids: dict[str, dict[str, list[Any]]] = {
+            "logistic_regression": {
+                "model__C": [0.25, 0.5, 1.0, 2.0],
+                "model__solver": ["lbfgs"],
+            },
+            "random_forest": {
+                "model__n_estimators": [300, 500],
+                "model__max_depth": [None, 10, 20],
+                "model__min_samples_split": [2, 4],
+                "model__min_samples_leaf": [1, 2],
+            },
+        }
+        if XGBClassifier is not None:
+            grids["xgboost"] = {
+                "model__n_estimators": [150, 300],
+                "model__max_depth": [3, 4, 5],
+                "model__learning_rate": [0.03, 0.05, 0.1],
+                "model__subsample": [0.8, 0.9],
+                "model__colsample_bytree": [0.8, 0.9],
+            }
+        if LGBMClassifier is not None:
+            grids["lightgbm"] = {
+                "model__n_estimators": [200, 400],
+                "model__num_leaves": [31, 63],
+                "model__learning_rate": [0.03, 0.05],
+                "model__subsample": [0.8, 0.9],
+                "model__colsample_bytree": [0.8, 0.9],
+            }
+        return grids
+
+
+    def _tune_model(
+        name: str,
+        pipeline: Pipeline,
+        X_train: pd.DataFrame,
+        y_train: pd.Series,
+        random_state: int = 42,
+    ) -> tuple[Pipeline, dict[str, Any]]:
+        """Tune one candidate model and return the best fitted estimator plus metadata."""
+
+        grids = _parameter_grids(random_state)
+        param_grid = grids.get(name, {})
+        if not param_grid:
+            pipeline.fit(X_train, y_train)
+            return pipeline, {"cv_best_score": None, "best_params": {}, "n_candidates": 1}
+
+        class_counts = y_train.value_counts()
+        min_class = int(class_counts.min()) if not class_counts.empty else 2
+        n_splits = max(3, min(5, min_class))
+        cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+        search = GridSearchCV(
+            estimator=pipeline,
+            param_grid=param_grid,
+            scoring="neg_log_loss",
+            cv=cv,
+            n_jobs=-1,
+            refit=True,
+            error_score="raise",
+        )
+        search.fit(X_train, y_train)
+        summary = {
+            "cv_best_score": float(search.best_score_),
+            "best_params": search.best_params_,
+            "n_candidates": int(len(search.cv_results_["params"])),
+        }
+        return search.best_estimator_, summary
     return candidates
 
 
@@ -162,10 +234,13 @@ def train_and_save_model(
     best_log_loss = float("inf")
     for name, pipeline in _candidate_models(random_state).items():
         try:
-            pipeline.fit(X_train, y_train)
-            y_pred = pipeline.predict(X_test)
-            y_proba = pipeline.predict_proba(X_test)
+            tuned_pipeline, tuning_summary = _tune_model(name, pipeline, X_train, y_train, random_state=random_state)
+            y_pred = tuned_pipeline.predict(X_test)
+            y_proba = tuned_pipeline.predict_proba(X_test)
             candidate_metrics = {
+                "cv_best_score": tuning_summary.get("cv_best_score"),
+                "best_params": tuning_summary.get("best_params", {}),
+                "n_candidates": tuning_summary.get("n_candidates", 1),
                 "accuracy": float(accuracy_score(y_test, y_pred)),
                 "log_loss": float(log_loss(y_test, y_proba, labels=[0, 1, 2])),
                 "f1_score": float(f1_score(y_test, y_pred, average="macro")),
@@ -175,7 +250,7 @@ def train_and_save_model(
             model_scores[name] = candidate_metrics
             if candidate_metrics["log_loss"] < best_log_loss:
                 best_name = name
-                best_pipeline = pipeline
+                best_pipeline = tuned_pipeline
                 best_log_loss = candidate_metrics["log_loss"]
         except Exception as exc:  # pragma: no cover - optional dependency failures
             LOGGER.exception("Model %s failed during training: %s", name, exc)
