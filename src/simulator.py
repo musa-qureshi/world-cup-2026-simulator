@@ -81,10 +81,11 @@ class WorldCupSimulator:
         """Simulate one full tournament from groups to final."""
 
         group_tables, advancing = self.simulate_group_stage()
-        round_of_32 = self._build_round_of_32(advancing)
-        round_of_16 = self._simulate_knockout_round(round_of_32)
-        quarterfinals = self._simulate_knockout_round(round_of_16)
-        semifinals = self._simulate_knockout_round(quarterfinals)
+        round_of_32_pairings = self._build_round_of_32(advancing)
+        round_of_32 = self._simulate_knockout_round(round_of_32_pairings)
+        round_of_16 = self._simulate_knockout_round(self._pair_round_winners(round_of_32))
+        quarterfinals = self._simulate_knockout_round(self._pair_round_winners(round_of_16))
+        semifinals = self._simulate_knockout_round(self._pair_round_winners(quarterfinals))
         finalists = [match.winner for match in semifinals]
         third_place = self._simulate_third_place_match(semifinals)
         final = self._simulate_knockout_round([(finalists[0], finalists[1])])[0]
@@ -159,6 +160,12 @@ class WorldCupSimulator:
         """Simulate a knockout round and return match outcomes."""
 
         return [self.simulate_match(home_team, away_team, knockout=True) for home_team, away_team in pairings]
+
+    def _pair_round_winners(self, matches: list[MatchOutcome]) -> list[tuple[str, str]]:
+        """Build next-round pairings from winners of the previous round."""
+
+        winners = [match.winner for match in matches if match.winner is not None]
+        return [(winners[index], winners[index + 1]) for index in range(0, len(winners), 2)]
 
     def _simulate_third_place_match(self, semifinals: list[MatchOutcome]) -> MatchOutcome:
         """Simulate the third-place playoff from the semifinal losers."""
@@ -278,7 +285,7 @@ class WorldCupSimulator:
     def _finishing_positions(
         self,
         group_tables: dict[str, pd.DataFrame],
-        round_of_32: list[tuple[str, str]],
+        round_of_32: list[MatchOutcome],
         round_of_16: list[MatchOutcome],
         quarterfinals: list[MatchOutcome],
         semifinals: list[MatchOutcome],
@@ -302,6 +309,9 @@ class WorldCupSimulator:
         for match in round_of_16:
             loser = match.away_team if match.winner == match.home_team else match.home_team
             positions.setdefault(loser, 16)
+        for match in round_of_32:
+            loser = match.away_team if match.winner == match.home_team else match.home_team
+            positions.setdefault(loser, 32)
         for group_table in group_tables.values():
             for _, row in group_table.iterrows():
                 positions.setdefault(str(row["team"]), 32 if row.name >= 2 else 16)
